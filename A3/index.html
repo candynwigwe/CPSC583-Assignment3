@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+    body {
+        width: 940px;
+        margin: 0 auto;
+        margin-top: 2em;
+    }
+
+    svg {
+        font: 10px sans-serif;
+    }
+
+    .axis path,
+    .axis line {
+        fill: none;
+        stroke: black;
+        shape-rendering: crispEdges;
+    }
+    .tooltip {
+        position: absolute;
+        fill: black;
+        width: 200px;
+        height: 28px;
+        pointer-events: none;
+    }
+    .brushed {
+        fill: #ff171c;
+        stroke: #ff101a;
+        opacity: 1.0;
+    }
+
+    .non_brushed {
+        fill: #404040;
+        opacity: 0.5;
+    }
+
+</style>
+<body>
+<script src="d3.js"></script>
+<script src="topojson.v1.min.js"></script>
+<script>
+    //let d3 = import(d3.js);
+    /**
+     * copied from the following resources:
+     * http://bl.ocks.org/micahstubbs/281d7b7a7e39a9b59cf80f1b8bd41a72
+     * http://bl.ocks.org/msbarry/9911363
+     * http://bl.ocks.org/weiglemc/6185069
+     *
+    **/
+
+	const margin = {top: 0, right: 0, bottom: 0, left: 0};
+	const width = 960 - margin.left - margin.right;
+	const height = 1000 - margin.top - margin.bottom;
+
+    const color = d3.scaleThreshold()
+        .domain([2, 3, 4, 5, 6, 7, 8])
+        .range( d3.schemeBlues[7] )
+        .unknown(d3.rgb(255,200,200));
+
+	const svg = d3.select('body')
+			.append('svg')
+			.attr('width', width)
+			.attr('height', height);
+
+    const map = svg
+        .append('g')
+        .attr('class', 'map');
+
+    const scatterplot = svg
+        .append('g')
+        .attr('class', 'scatterplot')
+        .attr("transform", "translate(100,550)");
+
+    const projection = d3.geoMercator()
+			.scale(130)
+			.translate( [width / 2, height / 1.5/2]);
+
+	const path = d3.geoPath().projection(projection);
+    const tooltip = svg.select( "body" ).append( "div" )
+        .attr( "class", "tooltip" )
+        .style( "opacity", 0 );
+
+    Promise.all([
+        d3.csv('who.csv'),
+        d3.json('world_countries.json'),
+        d3.tsv('world_population.tsv')
+    ]).then(function(data) {
+		const fertilityById = {};
+
+        let who = data[0];
+        let countries = data[1];
+        let population = data[2];
+
+        let fieldColor = 'Total fertility rate (per woman)';
+        let fieldXAxis = "Urban_population_growth";
+        let fieldYAxis = "Urban_population_pct_of_total";
+
+        who.forEach(d => {
+            if(d[fieldColor] == '') {
+                d[fieldColor] = undefined;
+            }
+        });
+
+        population.forEach(d =>
+        {
+            var res = who.find(e =>
+            {
+                return e.Country == d.name;
+            });
+            if(typeof res !== 'undefined') {
+                res.id = d.id;
+            }
+        });
+
+        who.forEach(d => { fertilityById[d.id] = +d[fieldColor]; });
+        countries.features.forEach(d => { d.population = fertilityById[d.id] });
+
+        const world = svg.append( 'g' )
+            .attr( 'class', 'countries' )
+            .selectAll( 'path' )
+            .data( countries.features )
+            .enter().append( 'path' )
+            .attr( "class", d => {
+                return "COUNTRY-CODE-" + d.id;
+            } )
+            .attr( 'd', path )
+            .style( 'fill', d => color( fertilityById[d.id] ) )
+            .style( 'stroke', 'white' )
+            .style( 'opacity', 0.8 )
+            .style( 'stroke-width', 0.3 )
+            .on( 'mouseover', function () {
+               svg.attr('class','countries')
+                    .selectAll('path')
+                    .data(countries.features)
+                    .style('stroke',`black`)
+                    .style( 'stroke-width', 1);
+
+            })
+            .on( 'mouseout', function (){
+                svg.attr( 'class', 'countries' )
+                    .selectAll('path')
+                    .data(countries.features)
+                    .style( 'stroke', 'white' )
+                    .style( 'opacity', 0.8 )
+                    .style( 'stroke-width', 0.3 )
+            }
+             );
+
+       /*var showMap = function (){
+            // disregard brushes w/o selections
+            // ref: http://bl.ocks.org/mbostock/6232537
+            if (!d3.event.selection) return;
+            // programmed clearing of brush after mouse-up
+            // ref: https://github.com/d3/d3-brush/issues/10
+            d3.select(this).call(brush.move, null);
+
+            var d_brushed =  d3.selectAll(".brushed").data();
+
+            // populate table if one or more elements is brushed
+            if (d_brushed.length > 0) {
+                highlightCountries();
+                d_brushed.forEach(d)
+            } else {
+                highlightCountries();
+            }
+        };
+        function highlightCountries(){
+            svg.selectAll('path')
+                .data(countries.features)
+                .style('stroke',`black`);
+
+        }*/
+
+
+        svg.append('path')
+				.datum(topojson.mesh(countries.features, (a, b) => a.id !== b.id))
+				.attr('class', 'names')
+				.attr('d', path);
+
+        // setup x
+        var xValue = function(d) { return d[fieldXAxis];}, // data -> value
+            xScale = d3.scaleLinear().range([0, height/2-100]), // value -> display
+            xMap = function(d) { return xScale(xValue(d));}, // data -> display
+            xAxis = d3.axisBottom().scale(xScale);
+
+        // setup y
+        var yValue = function(d) { return d[fieldYAxis];}, // data -> value
+            yScale = d3.scaleLinear().range([height/2-100, 0]), // value -> display
+            yMap = function(d) { return yScale(yValue(d));}, // data -> display
+            yAxis = d3.axisLeft().scale(yScale);
+
+        // don't want dots overlapping axis, so add in buffer to data domain
+        xScale.domain([-2, 8]);
+        yScale.domain([0, 100]);
+
+        // x-axis
+        scatterplot.append("g")
+            .attr("class", "x axis")
+            .attr("transform", "translate(0," + (height/2-100) + ")")
+            .call(xAxis)
+            .append("text")
+            .attr("class", "label")
+            .attr("x", xScale(8))
+            .attr("y", -6)
+            .style("text-anchor", "end")
+            .text(fieldXAxis.replace(/_/g, " "));
+
+        // y-axis
+        scatterplot.append("g")
+            .attr("class", "y axis")
+            .call(yAxis)
+            .append("text")
+            .attr("class", "label")
+            .attr("transform", "rotate(-90)")
+            .attr("x", 0)
+            .attr("y", yScale(100))
+            .attr("dy", "1.5em")
+            .style("text-anchor", "end")
+            .text(fieldYAxis.replace(/_/g, " "));
+
+        // draw dots
+        const circles = scatterplot.selectAll( ".dot" )
+            .data( who )
+            .enter().append( "circle" )
+            .attr( "class", d => {
+                return "dot COUNTRY-" + d.Country;
+            } )
+            .attr( "r", 3.5 )
+            .attr( "cx", xMap )
+            .attr( "cy", yMap )
+            .attr( "class", "non_brushed" )
+            .style( "fill", function (d) {
+                return color( d[fieldColor] );
+            } )
+            .on( "mouseover", function (d) {})
+                /*tooltip.transition()
+                    .duration( 200 )
+                    .style("opacity", .9);
+                tooltip.html( d["Country"])
+                    .style("left", (d3.event.pageX + 5) + "px")
+                    .style("top", (d3.event.pageY - 28) + "px");
+            } )*/
+            .on( "mouseout", function (d) {
+            } );
+
+
+
+        function highlightBrushedCircles() {
+
+            if (d3.event.selection != null) {
+
+                // revert circles to initial style
+                circles.attr("class", "non_brushed");
+
+                const brush_coords = d3.brushSelection(this);
+
+                // style brushed circles
+                circles.filter(function (){
+
+                    const cx = d3.select(this).attr("cx"),
+                        cy = d3.select(this).attr("cy");
+
+                    return isBrushed(brush_coords, cx, cy);
+                })
+                .attr("class", "brushed");
+            }
+        }
+
+        const brush = d3.brush()
+            .on( "brush", highlightBrushedCircles )
+            .on("end",function (d) {
+                tooltip.transition()
+                    .duration( 200 )
+                    .style("opacity", .9);
+                tooltip.html( d["Country"])
+                    .style("left", (d3.event.pageX + 5) + "px")
+                    .style("top", (d3.event.pageY - 28) + "px")});
+            //.on("end", showMap());
+
+        scatterplot.append("g")
+            .call(brush);
+
+        });
+
+
+
+    function isBrushed(brush_coords, cx, cy) {
+
+        var x0 = brush_coords[0][0],
+            x1 = brush_coords[1][0],
+            y0 = brush_coords[0][1],
+            y1 = brush_coords[1][1];
+        return x0 <= cx && cx <= x1 && y0 <= cy && cy <= y1;
+    }
+
+
+
+
+
+    // draw legend
+        var legend = scatterplot.append("g").attr("class", "legend-group").selectAll(".legend")
+            .data(color.domain())
+            .enter().append("g")
+            .attr("class", "legend")
+            .attr("transform", function(d, i) { return "translate(-100," + (i+1) * 20 + ")"; });
+
+        // draw legend colored rectangles
+        legend.append("rect")
+            .attr("x", width/2 + 4)
+            .attr("width", 18)
+            .attr("height", 18)
+            .style("fill", (d,i)=> color(d-0.0001));
+
+        // draw legend text
+        legend.append("text")
+            .attr("x", width/2 - 3)
+            .attr("y", 9)
+            .attr("dy", ".35em")
+            .style("text-anchor", "end")
+            .text(function(d) { return "< "+d;});
+
+        scatterplot.select("g.legend-group")
+            .append("g")
+            .attr("class", "legend")
+            .attr("transform", "translate(-100,0)")
+            .append("text")
+            .attr("x", width/2+22)
+            .attr("y", 0)
+            .attr("dy", "1.5em")
+            .style("text-anchor", "end")
+            .text(fieldColor );
+
+
+
+
+</script>
+</body>
+</html>
